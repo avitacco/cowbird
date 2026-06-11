@@ -3,6 +3,7 @@ package main
 import (
 	"cowbird/internal/auth"
 	"cowbird/internal/config"
+	"cowbird/internal/core"
 	"cowbird/internal/credentials"
 	"cowbird/internal/ui"
 	"cowbird/internal/vault"
@@ -23,16 +24,15 @@ func main() {
 	needsSetup := cfg.Vault.Address == "" || cfg.Vault.AuthMethod == ""
 
 	if !needsSetup {
-		// Config exists -- check that credentials are actually present.
+		// Config exists — check that credentials are actually present.
 		store, err := credentials.NewStore("cowbird")
 		if err != nil {
 			log.Fatalf("error opening credential store: %v", err)
 		}
 		method := auth.ByName(cfg.Vault.AuthMethod)
 		if method == nil {
-			log.Fatalf("unknown auth method %q in config -- delete config and re-run setup", cfg.Vault.AuthMethod)
+			log.Fatalf("unknown auth method %q in config — delete config and re-run setup", cfg.Vault.AuthMethod)
 		}
-		// Check the first required credential key as a proxy for "setup done".
 		if len(method.Fields()) > 0 {
 			if _, err := store.Get(method.Fields()[0].Key); err == keyring.ErrKeyNotFound {
 				needsSetup = true
@@ -46,8 +46,11 @@ func main() {
 			if err != nil {
 				return err
 			}
-			mainW := ui.NewMainWindow(a, v)
-			mainW.Show()
+			unlockW := ui.NewUnlockWindow(a, v, func(coreApp *core.App) {
+				mainW := ui.NewMainWindow(a, coreApp)
+				mainW.Show()
+			})
+			unlockW.Show()
 			return nil
 		})
 		w.ShowAndRun()
@@ -66,6 +69,9 @@ func main() {
 	}
 	defer v.Close()
 
-	w := ui.NewMainWindow(a, v)
+	w := ui.NewUnlockWindow(a, v, func(coreApp *core.App) {
+		mainW := ui.NewMainWindow(a, coreApp)
+		mainW.Show()
+	})
 	w.ShowAndRun()
 }

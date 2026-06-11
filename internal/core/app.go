@@ -1,11 +1,23 @@
 package core
 
-import "cowbird/internal/vault"
+import (
+	"cowbird/internal/crypto"
+	"cowbird/internal/sharing"
+	"cowbird/internal/vault"
+)
 
+// App is the fully initialised application state: an authenticated Vault
+// connection, a decrypted identity, and a sharing service wired to both.
 type App struct {
-	vault *vault.Vault
+	Vault    *vault.Vault
+	Identity *crypto.Identity
+	Service  *sharing.Service
 }
 
-func NewApp(v *vault.Vault) *App {
-	return &App{vault: v}
+func NewApp(v *vault.Vault, id *crypto.Identity) *App {
+	return &App{
+		Vault:    v,
+		Identity: id,
+		Service:  sharing.NewService(v.EntityID, id, v),
+	}
 }

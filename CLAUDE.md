@@ -1,0 +1,141 @@
+# cowbird
+
+A Go password manager that uses HashiCorp Vault as its storage backend. No server component of its own. GUI is Fyne-based. Targets desktop (macOS/Linux/Windows) and eventually mobile (Android/iOS).
+
+- Repo: https://github.com/avitacco/cowbird
+- App ID: `co.avitac.cowbird`
+- Go 1.26
+
+## Architecture
+
+Core logic is decoupled from the UI so a CLI interface can be added later. Dependency injection is hand-coded in `main.go` (Wire is not used; not warranted at this scale).
+
+Internal packages:
+
+- `config` — configuration loading and saving
+- `credentials` — credential model and storage
+- `auth` — Vault authentication methods
+- `vault` — Vault client wrapper; also implements `sharing.Store`
+- `crypto` — keypair generation, XChaCha20-Poly1305, X25519 wrapping, Argon2id KDF, key export/import
+- `items` — item content types and JSON codec
+- `sharing` — envelope crypto, inbox protocol, share/revoke service
+- `core` — application state (`App`), identity initialisation
+- `ui` — Fyne UI
+
+Key dependencies: `fyne.io/fyne/v2`, `github.com/99designs/keyring`, `hashicorp/vault-client-go` (v0.4.3), `spf13/viper`, `creasty/defaults`, `golang.org/x/crypto`.
+
+### auth
+
+`Method` interface with three implementations: `Userpass`, `Token`, `AppRole`. Each handles `Authenticate` and `Renew`.
+
+### vault
+
+`Vault` struct accepts an `auth.Method`. Stores the token as a struct field (not read back from client config, since `v.client.Configuration().Token` does not exist in vault-client-go v0.4.3). Runs background token renewal on a cancellable context.
+
+`VerifyMount` lists the user's own KV metadata path and treats a 404 as success, because `MountsReadConfiguration` is not permitted by cowbird's Vault policy.
+
+`*Vault` implements `sharing.Store` (`vault/store.go`). All KV writes store `{"v": "<json-string>"}` wrappers. Hard delete uses `KvV2DeleteMetadataAndAllVersions`. `vault/identity.go` adds `GetLockedIdentity`/`PutLockedIdentity` at path `users/<entityID>/identity`.
+
+KV v2 paths used:
+- `users/<entityID>/items/<itemID>` — owner's own items
+- `users/<entityID>/identity` — locked identity (encrypted keypair)
+- `users/<entityID>/links/<shareID>` — durable SharedLink records
+- `pubkeys/<entityID>` — public encryption keys
+- `shared/<ownerEntityID>/<shareID>` — shared item envelopes
+- `inbox/<recipientEntityID>/<msgID>` — transient share/revoke messages
+
+### config
+
+Viper + `mapstructure` + `creasty/defaults` for struct-tag-based defaults. Vault address and mount path are stored in TOML. Auth credentials are stored in the OS keyring via a `CredentialStore` interface (`Get`/`Set`/`Delete`), backed by `99designs/keyring` on desktop/CLI and stubbed on mobile (separated by build tags).
+
+`Save(cfg Config) error` is a reusable function that uses `viper.ConfigFileUsed()`.
+
+### crypto
+
+Argon2id KDF with HKDF domain separation: `DeriveUnlockKey` uses info `"cowbird-unlock-v1"` and `DeriveWrapKey` (internal to `wrap.go`) uses `"cowbird-wrap-v1"`. Argon2id params: time=3, memory=64MB, threads=4, keyLen=32.
+
+XChaCha20-Poly1305 for item content and key wrapping. `Seal`/`Open` in `aes.go`. `Open` returns a generic `"decryption failed"` error to avoid leaking failure mode.
+
+X25519 keypairs via `crypto/ecdh` (Go stdlib since 1.20) — avoids manual scalar clamping. `WrapKey` (in `wrap.go`) uses ephemeral ECDH + HKDF to derive a per-wrap key; `EphemeralPub`, `Nonce`, and `Wrapped` are all stored explicitly.
+
+`Identity` holds `EncryptionPub/EncryptionPriv [32]byte` and Ed25519 fields (deferred). `LockIdentity`/`UnlockIdentity` encrypt the private key with an Argon2id-derived key. `ExportKey`/`ImportKey` in `export.go` produce a passphrase-protected JSON blob (`ExportedKey{Version, Salt, Nonce, Ciphertext}`).
+
+`Fingerprint` is hex-encoded SHA-256 of `EncryptionPub`.
+
+### items
+
+One `Content` interface with concrete typed structs: `Login`, `Card`, `Note`, `Identity`, `Password`, `Custom`. Each carries `CustomFields []Field` for arbitrary extra fields.
+
+`Encode`/`Decode` in `codec.go` use a `{"type": "...", "data": {...}}` envelope for type-dispatch. `Decode` uses a generic helper `decodeAs[T Content]`.
+
+### sharing
+
+`Store` interface (`store.go`) defines all Vault operations used by the package — implemented by `*vault.Vault`.
+
+`envelope.go`: `NewEnvelope` generates a random item key, encrypts content with XChaCha20-Poly1305, wraps the item key to the owner's X25519 public key, and returns the envelope. `OpenEnvelope` finds the owner's wrapped key and decrypts. `WrapKeyForRecipient` adds a recipient's wrapped key.
+
+`service.go`: `Service{entityID, identity, store}` drives create/open/share/revoke/processInbox. `ProcessInbox` is idempotent: write/remove SharedLink first, then delete the inbox message, so partial failures self-heal. Ordering tiebreaker is the KV v2 `env_version` (server-assigned monotonic version).
+
+`InboxEntry{ID string, Msg Message}` wraps `Message` with the Vault path key (required for deletion, since `Message` has no ID field of its own).
+
+`SharePayload.WrappedKey []byte` and `SharedLink.WrappedKey []byte` both contain JSON-marshaled `WrappedKey` structs (all three ECDH fields).
+
+### core
+
+`App{Vault, Identity, Service}` is the fully initialised application state. `NewApp` wires `sharing.NewService`.
+
+`InitIdentity` (in `core.go`) handles both paths: first run (generate keypair → lock → store → publish pubkey) and returning user (retrieve locked identity → decrypt). The unlock password is intentionally separate from the Vault auth credential.
+
+### ui
+
+`NewSetupWindow` handles the first-run flow: collects vault address, mount path, auth method, and credentials; validates; authenticates; verifies mount access; saves config; opens the main window.
+
+`NewUnlockWindow` (in `unlock.go`) checks whether a locked identity exists in Vault asynchronously, then swaps the window body to show either a "set password" form (first run, with confirmation) or a "enter password" form (returning user). On submit, calls `core.InitIdentity` in a goroutine, then `onUnlock(app)` on the main thread.
+
+`NewMainWindow` (in `app.go`) is currently a placeholder showing the key fingerprint.
+
+## Conventions
+
+- Config structs live in `internal/config`. Sub-configs are passed to components (e.g. `NewVault(cfg config.Vault)`) rather than spread across packages.
+- Defaults are defined once via `creasty/defaults` struct tags, never duplicated in `viper.SetDefault()`.
+- Go prohibits defining methods on types from other packages; structure accordingly.
+
+## Vault setup
+
+- Vault v2.0.0 at `vault.avitac.co:8200`
+- KV v2, mount: `cowbird`
+- userpass auth, mount accessor: `auth_userpass_1c802641`
+- Policy: `cowbird-user-access`, using `{{identity.entity.id}}` templating
+- Vault userpass emits no group claims in v2.0.0, so external group auto-enrollment does not work. Policy must be set directly on users. Per-user `token_policies` is the current workaround and is not ideal; revisit policy assignment at scale.
+
+## On the horizon
+
+- Full item list UI (main window is currently a fingerprint placeholder)
+- Password change flow (re-wrap locked identity under new Argon2id-derived key; no item re-encryption needed)
+- Key rotation flow (new keypair, re-wrap all item keys, republish public key)
+- Key export/import UI (`crypto.ExportKey`/`ImportKey` are implemented; UI is not)
+- Vault policy update: add `users/<eid>/identity` and `users/<eid>/links/*` paths; confirm inbox hard-delete on metadata path
+- Vault policy assignment at scale
+- Mobile implementation (currently stubbed)
+- CLI interface
+- TOFU change detection (deliberately deferred; see `specs/001-sharing-and-items/research.md`)
+- Optional Ed25519 authorship signing (deferred; slot reserved in `sharing.Envelope.Signature`)
+
+## Gotchas
+
+- Fyne widget values must be captured on the main thread before launching goroutines. All Fyne widget updates from goroutines must use `fyne.Do()`.
+- `widget.NewFormItem` is not a `fyne.CanvasObject`, so it cannot be added to `container.NewVBox`.
+- `viper.ConfigFileNotFoundError` is not triggered when using `SetConfigFile`; check with `os.IsNotExist` instead.
+- `time.Duration` serializes as raw nanoseconds through mapstructure/viper.
+- vault-client-go's KV response parser does NOT use `json.Number`. When reading raw `map[string]interface{}` from response metadata (e.g. to extract the `version` field), numbers arrive as `json.Number` only if you set `decoder.UseNumber()` yourself — otherwise they silently become `float64`, which loses precision for large version integers. `vault/store.go`'s `versionFromMetadata` type-asserts to `json.Number` and calls `.Int64()`.
+- `KvV2DeleteMetadataAndAllVersions` returns a nil response body on success (204 No Content). Accessing fields on a nil response panics; guard with a nil check or just ignore the response.
+- KV v2 list returns a 404 when no keys exist yet under a prefix; `vault/store.go`'s `kvList` treats a 404 as an empty list, not an error.
+- `Message` has no `ID` field — the Vault path component that identifies the inbox message is external to the struct. `sharing.InboxEntry{ID, Msg}` exists specifically to carry that path key out of `ListInboxMessages` so callers can pass it to `DeleteInboxMessage`.
+
+## Sharing and items design
+
+See the spec set for the current design:
+@specs/001-sharing-and-items/spec.md
+@specs/001-sharing-and-items/plan.md
+@specs/001-sharing-and-items/data-model.md
+@specs/001-sharing-and-items/research.md
