@@ -14,6 +14,26 @@ Cowbird is built for deployments with a **known, finite set of users** — a com
 2. **Item sharing between users.** A user can share an individual item with another user, who can then read it (and see subsequent edits) without the content ever being re-encrypted per recipient.
 3. **No operator-side recovery.** The only recovery mechanism is a user-initiated, passphrase-protected export of the private key. There is deliberately no admin reset: no trusted party exists who could perform one without also being able to read your data.
 
+## Status
+
+- [x] **Crypto layer** — Argon2id/HKDF KDF, XChaCha20-Poly1305 seal/open, X25519 key wrapping, identity lock/unlock, key export/import (with tests)
+- [x] **Item types and codec** — all six content types, custom fields, type-dispatch encode/decode (with tests)
+- [x] **Vault integration** — auth (userpass/token/AppRole), background token renewal, mount verification, full `sharing.Store` implementation, locked-identity storage
+- [x] **Sharing service** — create/open items, share, revoke, idempotent inbox processing (with integration tests against an in-memory store)
+- [x] **First-run setup UI** — Vault address/mount/auth collection, validation, config save
+- [x] **Unlock UI** — set-password (first run) and enter-password (returning user) flows; identity creation and unlock
+- [x] **Config & credential storage** — TOML config, OS-keyring credential store
+- [ ] **Item list / editor UI** — the main window is currently a placeholder showing the key fingerprint; sharing has no UI either
+- [ ] **Password change flow** — crypto primitives exist; service layer and UI do not
+- [ ] **Key rotation flow** — same: primitives done, no service/UI
+- [ ] **Key export/import UI** — `crypto.ExportKey`/`ImportKey` are implemented; no UI
+- [ ] **Vault policy updates** — `users/<eid>/identity` and `users/<eid>/links/*` paths still need adding; policy assignment at scale is unresolved (userpass in Vault 2.0.0 emits no group claims, so policies are set per user)
+- [ ] **CLI interface**
+- [ ] **Mobile** — credential store is stubbed; no mobile builds
+- [ ] **TOFU change detection** — deliberately deferred (see trust model)
+- [ ] **Ed25519 authorship signing** — deferred; envelope field reserved
+
+
 ### Trust model: semi-trusted operator
 
 The storage operator is treated as **semi-trusted**: technically prevented from reading item contents, but assumed not to actively forge user identities (Decision 3 in [research.md](specs/001-sharing-and-items/research.md)). In both target deployments the operator is accountable and non-adversarial — a corporate Vault team, or the user themselves.
@@ -35,25 +55,6 @@ Three distinct secrets exist by design:
 | Export passphrase | Protects an exported key file | User's head only |
 
 The unlock password is intentionally separate from the Vault credential, so an operator-side credential reset cannot decrypt data. Following the Bitwarden model, **changing the unlock password** only re-wraps the key material (cheap), while **rotating the key** re-secures all items (expensive, for compromise scenarios) — these are distinct operations.
-
-## Status
-
-- [x] **Crypto layer** — Argon2id/HKDF KDF, XChaCha20-Poly1305 seal/open, X25519 key wrapping, identity lock/unlock, key export/import (with tests)
-- [x] **Item types and codec** — all six content types, custom fields, type-dispatch encode/decode (with tests)
-- [x] **Vault integration** — auth (userpass/token/AppRole), background token renewal, mount verification, full `sharing.Store` implementation, locked-identity storage
-- [x] **Sharing service** — create/open items, share, revoke, idempotent inbox processing (with integration tests against an in-memory store)
-- [x] **First-run setup UI** — Vault address/mount/auth collection, validation, config save
-- [x] **Unlock UI** — set-password (first run) and enter-password (returning user) flows; identity creation and unlock
-- [x] **Config & credential storage** — TOML config, OS-keyring credential store
-- [ ] **Item list / editor UI** — the main window is currently a placeholder showing the key fingerprint; sharing has no UI either
-- [ ] **Password change flow** — crypto primitives exist; service layer and UI do not
-- [ ] **Key rotation flow** — same: primitives done, no service/UI
-- [ ] **Key export/import UI** — `crypto.ExportKey`/`ImportKey` are implemented; no UI
-- [ ] **Vault policy updates** — `users/<eid>/identity` and `users/<eid>/links/*` paths still need adding; policy assignment at scale is unresolved (userpass in Vault 2.0.0 emits no group claims, so policies are set per user)
-- [ ] **CLI interface**
-- [ ] **Mobile** — credential store is stubbed; no mobile builds
-- [ ] **TOFU change detection** — deliberately deferred (see trust model)
-- [ ] **Ed25519 authorship signing** — deferred; envelope field reserved
 
 ## Encryption
 
