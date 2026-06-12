@@ -40,6 +40,7 @@ KV v2 paths used:
 - `users/<entityID>/items/<itemID>` — owner's own items
 - `users/<entityID>/identity` — locked identity (encrypted keypair)
 - `users/<entityID>/links/<shareID>` — durable SharedLink records
+- `users/<entityID>/shares/<shareID>` — owner's ShareRecords (outgoing shares)
 - `pubkeys/<entityID>` — public encryption keys
 - `shared/<ownerEntityID>/<shareID>` — shared item envelopes
 - `inbox/<recipientEntityID>/<msgID>` — transient share/revoke messages
@@ -74,7 +75,9 @@ One `Content` interface with concrete typed structs: `Login`, `Card`, `Note`, `I
 
 `envelope.go`: `NewEnvelope` generates a random item key, encrypts content with XChaCha20-Poly1305, wraps the item key to the owner's X25519 public key, and returns the envelope. `OpenEnvelope` finds the owner's wrapped key and decrypts. `WrapKeyForRecipient` adds a recipient's wrapped key.
 
-`service.go`: `Service{entityID, identity, store}` drives create/open/share/revoke/processInbox. `ProcessInbox` is idempotent: write/remove SharedLink first, then delete the inbox message, so partial failures self-heal. Ordering tiebreaker is the KV v2 `env_version` (server-assigned monotonic version).
+`service.go`: `Service{entityID, identity, store}` drives create/open/update/delete/list/share/revoke/processInbox. `ProcessInbox` is idempotent: write/remove SharedLink first, then delete the inbox message, so partial failures self-heal. Ordering tiebreaker is the KV v2 `env_version` (server-assigned monotonic version).
+
+`Share` writes an independent *copy* of the envelope per share (new shareID, same ciphertext/item key) and records each outgoing share as a `ShareRecord` in the owner's subtree. `UpdateItem` reuses the existing item key (fresh nonce — recipients' wrapped keys stay valid) and rewrites every shared envelope found via ShareRecords. `DeleteItem` revokes all outstanding shares (envelope delete → revoke message → record delete) before deleting the owned envelope. `Revoke` and `DeleteSharedLink` are idempotent so partial failures are retryable.
 
 `InboxEntry{ID string, Msg Message}` wraps `Message` with the Vault path key (required for deletion, since `Message` has no ID field of its own).
 
@@ -92,7 +95,7 @@ One `Content` interface with concrete typed structs: `Login`, `Card`, `Note`, `I
 
 `NewUnlockWindow` (in `unlock.go`) checks whether a locked identity exists in Vault asynchronously, then swaps the window body to show either a "set password" form (first run, with confirmation) or a "enter password" form (returning user). On submit, calls `core.InitIdentity` in a goroutine, then `onUnlock(app)` on the main thread.
 
-`NewMainWindow` (in `app.go`) is currently a placeholder showing the key fingerprint.
+`NewMainWindow` (in `app.go`) is the item list/editor: HSplit master-detail with toolbar (new/refresh), search + type filter, and a status bar with retry. `fields.go` holds the descriptor table (`typeSpecs`) mapping each item type to its fields; both the read-only detail view (`detail.go`, mask/reveal/copy) and the editors (`editor.go`, including the custom-fields repeater) are generated from it. `model.go`'s `loadRows` processes the inbox, decrypts everything readable, turns decrypt failures into "unreadable" rows, and silently deletes dead SharedLinks (envelope 404 = missed revoke). Shared items are read-only in the UI.
 
 ## Conventions
 
@@ -110,11 +113,11 @@ One `Content` interface with concrete typed structs: `Login`, `Card`, `Note`, `I
 
 ## On the horizon
 
-- Full item list UI (main window is currently a fingerprint placeholder)
+- Share/revoke UI (feature 003; service methods and owner-side ShareRecords exist)
 - Password change flow (re-wrap locked identity under new Argon2id-derived key; no item re-encryption needed)
 - Key rotation flow (new keypair, re-wrap all item keys, republish public key)
 - Key export/import UI (`crypto.ExportKey`/`ImportKey` are implemented; UI is not)
-- Vault policy update: add `users/<eid>/identity` and `users/<eid>/links/*` paths; confirm inbox hard-delete on metadata path
+- Vault policy update: confirm `users/<eid>/identity`, `users/<eid>/links/*`, and `users/<eid>/shares/*` paths (one self-subtree rule covers all); confirm inbox hard-delete on metadata path
 - Vault policy assignment at scale
 - Mobile implementation (currently stubbed)
 - CLI interface
