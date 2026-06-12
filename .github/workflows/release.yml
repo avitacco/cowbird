@@ -1,0 +1,85 @@
+name: Release
+
+# Builds platform packages with `fyne package` on native runners (Fyne uses
+# CGO, so cross-compilation is avoided) and attaches them to a GitHub release.
+# Trigger by pushing a semver tag: git tag v0.1.0 && git push origin v0.1.0
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-amd64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+          - os: windows-latest
+            target: windows-amd64
+          - os: macos-15-intel
+            target: darwin-amd64
+          - os: macos-latest
+            target: darwin-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev
+
+      - name: Install fyne CLI
+        run: go install fyne.io/tools/cmd/fyne@latest
+
+      - name: Package
+        shell: bash
+        # fyne requires an x.y.z version; tags must look like v0.1.0
+        run: fyne package --release --app-version "${GITHUB_REF_NAME#v}"
+
+      - name: Collect artifact
+        shell: bash
+        run: |
+          mkdir dist
+          case "${{ matrix.target }}" in
+            linux-*)   mv cowbird.tar.xz "dist/cowbird-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.xz" ;;
+            windows-*) 7z a "dist/cowbird-${GITHUB_REF_NAME}-${{ matrix.target }}.zip" cowbird.exe ;;
+            darwin-*)  ditto -c -k --keepParent cowbird.app "dist/cowbird-${GITHUB_REF_NAME}-${{ matrix.target }}.zip" ;;
+          esac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cowbird-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: cd dist && sha256sum * > SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

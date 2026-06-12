@@ -1,0 +1,8 @@
+Website = "https://avitacco.github.io/cowbird/"
+
+[Details]
+Icon = "assets/icons/cowbirdicon1024.png"
+Name = "cowbird"
+ID = "co.avitac.cowbird"
+Version = "0.1.0"
+Build = 2
