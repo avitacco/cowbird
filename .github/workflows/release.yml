@@ -30,9 +30,9 @@ jobs:
           - os: macos-latest
             target: darwin-arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -55,12 +55,21 @@ jobs:
         run: |
           mkdir dist
           case "${{ matrix.target }}" in
-            linux-*)   mv cowbird.tar.xz "dist/cowbird-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.xz" ;;
+            # Flatten fyne's make-install tree (usr/local/...) so the binary,
+            # desktop entry, and icon sit at the archive root.
+            linux-*)
+              tar -xf cowbird.tar.xz
+              mkdir staging
+              mv cowbird/usr/local/bin/cowbird \
+                 cowbird/usr/local/share/applications/*.desktop \
+                 cowbird/usr/local/share/pixmaps/*.png staging/
+              tar -cJf "dist/cowbird-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.xz" -C staging .
+              ;;
             windows-*) 7z a "dist/cowbird-${GITHUB_REF_NAME}-${{ matrix.target }}.zip" cowbird.exe ;;
             darwin-*)  ditto -c -k --keepParent cowbird.app "dist/cowbird-${GITHUB_REF_NAME}-${{ matrix.target }}.zip" ;;
           esac
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cowbird-${{ matrix.target }}
           path: dist/*
@@ -71,7 +80,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -79,7 +88,7 @@ jobs:
       - name: Generate checksums
         run: cd dist && sha256sum * > SHA256SUMS.txt
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true
