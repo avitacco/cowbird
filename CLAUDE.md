@@ -110,7 +110,8 @@ One `Content` interface with concrete typed structs: `Login`, `Card`, `Note`, `I
 - Vault v2.0.0 at `vault.avitac.co:8200`
 - KV v2, mount: `cowbird`
 - userpass auth, mount accessor: `auth_userpass_1c802641`
-- Policy: `cowbird-user-access`, using `{{identity.entity.id}}` templating
+- Policy: `cowbird-user-access`, using `{{identity.entity.id}}` templating — checked into the repo as `cowbird-user-access.hcl` (keep the live policy and the file in sync)
+- Vault ACL rules do NOT merge: the most specific matching path wins outright, so an exact templated path shadowed by a glob must repeat the glob's capabilities (this bit us: own-pubkey rule needs explicit `read` despite `read` on `data/pubkeys/*`)
 - Vault userpass emits no group claims in v2.0.0, so external group auto-enrollment does not work. Policy must be set directly on users. Per-user `token_policies` is the current workaround and is not ideal; revisit policy assignment at scale.
 
 ## On the horizon

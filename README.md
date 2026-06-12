@@ -28,7 +28,8 @@ Cowbird is built for deployments with a **known, finite set of users** — a com
 - [ ] **Password change flow** — crypto primitives exist; service layer and UI do not
 - [ ] **Key rotation flow** — same: primitives done, no service/UI
 - [ ] **Key export/import UI** — `crypto.ExportKey`/`ImportKey` are implemented; no UI
-- [ ] **Vault policy updates** — `users/<eid>/identity`, `users/<eid>/links/*`, and `users/<eid>/shares/*` paths still need confirming (one `users/{{identity.entity.id}}/*` rule covers all three); policy assignment at scale is unresolved (userpass in Vault 2.0.0 emits no group claims, so policies are set per user)
+- [x] **Vault policy** — reference policy checked in as [`cowbird-user-access.hcl`](cowbird-user-access.hcl), verified against the live deployment (including the pubkey-directory list and the ACL precedence fix for the own-pubkey rule)
+- [ ] **Policy assignment at scale** — userpass in Vault 2.0.0 emits no group claims, so the policy is set per user via `token_policies`; revisit before deployments grow
 - [ ] **CLI interface**
 - [ ] **Mobile** — credential store is stubbed; no mobile builds
 - [ ] **TOFU change detection** — deliberately deferred (see trust model)
