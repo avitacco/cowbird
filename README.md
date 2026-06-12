@@ -197,3 +197,9 @@ go run .
 ```
 
 Requires a reachable Vault (KV v2 engine) with a per-entity templated policy as described above. Design documents live in [`specs/001-sharing-and-items/`](specs/001-sharing-and-items/): [spec](specs/001-sharing-and-items/spec.md), [plan](specs/001-sharing-and-items/plan.md), [data model](specs/001-sharing-and-items/data-model.md), and [decision record](specs/001-sharing-and-items/research.md).
+
+## License
+
+Copyright (C) 2026 Anthony Vitacco
+
+Cowbird is free software, licensed under the [GNU General Public License v3.0](LICENSE). You may redistribute and modify it under the terms of that license; derivative works must remain open source under the same terms.
