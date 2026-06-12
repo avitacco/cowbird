@@ -42,4 +42,9 @@ type Store interface {
 	GetSharedLink(ctx context.Context, shareID string) (SharedLink, error)
 	DeleteSharedLink(ctx context.Context, shareID string) error
 	ListSharedLinks(ctx context.Context) ([]SharedLink, error)
+
+	// ShareRecords (users/<entityID>/shares/<shareID>; owner's outgoing shares)
+	PutShareRecord(ctx context.Context, rec ShareRecord) error
+	ListShareRecords(ctx context.Context) ([]ShareRecord, error)
+	DeleteShareRecord(ctx context.Context, shareID string) error
 }

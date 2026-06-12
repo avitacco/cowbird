@@ -67,6 +67,17 @@ type SharedLink struct {
 	EnvVersion int64  `json:"env_version"` // version of the envelope last acted on
 }
 
+// ShareRecord is the owner's durable record of one outgoing share, stored in
+// the owner's own subtree. It is what lets item edits propagate to shared
+// envelopes, lets DeleteItem revoke outstanding shares, and will back the
+// share-management UI.
+type ShareRecord struct {
+	ShareID     string `json:"share_id"`
+	ItemID      string `json:"item_id"` // the owned item this share was made from
+	RecipientID string `json:"recipient_id"`
+	ItemType    string `json:"item_type"`
+}
+
 // InboxEntry wraps a Message with its inbox path identifier.
 // The ID is the Vault key name (not stored inside the message itself),
 // needed to delete the message after processing.

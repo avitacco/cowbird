@@ -23,11 +23,12 @@ Cowbird is built for deployments with a **known, finite set of users** — a com
 - [x] **First-run setup UI** — Vault address/mount/auth collection, validation, config save
 - [x] **Unlock UI** — set-password (first run) and enter-password (returning user) flows; identity creation and unlock
 - [x] **Config & credential storage** — TOML config, OS-keyring credential store
-- [ ] **Item list / editor UI** — the main window is currently a placeholder showing the key fingerprint; sharing has no UI either
+- [x] **Item list / editor UI** — searchable master-detail window: create/edit/delete for all six types with custom fields, masked sensitive values with reveal/copy, shared items read-only
+- [ ] **Share / revoke UI** — the service calls exist; no UI yet
 - [ ] **Password change flow** — crypto primitives exist; service layer and UI do not
 - [ ] **Key rotation flow** — same: primitives done, no service/UI
 - [ ] **Key export/import UI** — `crypto.ExportKey`/`ImportKey` are implemented; no UI
-- [ ] **Vault policy updates** — `users/<eid>/identity` and `users/<eid>/links/*` paths still need adding; policy assignment at scale is unresolved (userpass in Vault 2.0.0 emits no group claims, so policies are set per user)
+- [ ] **Vault policy updates** — `users/<eid>/identity`, `users/<eid>/links/*`, and `users/<eid>/shares/*` paths still need confirming (one `users/{{identity.entity.id}}/*` rule covers all three); policy assignment at scale is unresolved (userpass in Vault 2.0.0 emits no group claims, so policies are set per user)
 - [ ] **CLI interface**
 - [ ] **Mobile** — credential store is stubbed; no mobile builds
 - [ ] **TOFU change detection** — deliberately deferred (see trust model)
@@ -48,9 +49,9 @@ Consequences of this choice:
 
 Three distinct secrets exist by design:
 
-| Secret | Purpose | Where it lives |
-|---|---|---|
-| Vault auth credential (userpass / token / AppRole) | Authenticates to Vault | OS keyring |
+| Secret | Purpose | Where it lives   |
+|---|---|------------------|
+| Vault auth credential (userpass / token / AppRole) | Authenticates to Vault | OS keyring       |
 | Unlock password | Decrypts the user's private key | User's head only |
 | Export passphrase | Protects an exported key file | User's head only |
 
