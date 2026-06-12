@@ -9,6 +9,7 @@ import (
 	"cowbird/internal/vault"
 	"log"
 
+	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"github.com/99designs/keyring"
 )
@@ -41,16 +42,21 @@ func main() {
 	}
 
 	if needsSetup {
+		// This callback runs on the setup window's connect goroutine: the
+		// Vault connection stays here, but window work must go back to the
+		// Fyne main thread.
 		w := ui.NewSetupWindow(a, func(cfg config.Config, method auth.Method, store credentials.CredentialStore) error {
 			v, err := vault.NewVault(cfg.Vault, store, method)
 			if err != nil {
 				return err
 			}
-			unlockW := ui.NewUnlockWindow(a, v, func(coreApp *core.App) {
-				mainW := ui.NewMainWindow(a, coreApp)
-				mainW.Show()
+			fyne.Do(func() {
+				unlockW := ui.NewUnlockWindow(a, v, func(coreApp *core.App) {
+					mainW := ui.NewMainWindow(a, coreApp)
+					mainW.Show()
+				})
+				unlockW.Show()
 			})
-			unlockW.Show()
 			return nil
 		})
 		w.ShowAndRun()

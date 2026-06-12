@@ -33,6 +33,10 @@ func NewUnlockWindow(a fyne.App, v *vault.Vault, onUnlock UnlockDoneFunc) fyne.W
 	confirmEntry := widget.NewPasswordEntry()
 	confirmEntry.SetPlaceHolder("Confirm password")
 
+	strengthLabel := ""
+	strengthBar := widget.NewProgressBar()
+	strengthBar.TextFormatter = func() string { return strengthLabel }
+
 	statusLabel := widget.NewLabel("")
 	submitBtn := widget.NewButton("Please wait…", nil)
 	submitBtn.Disable()
@@ -83,17 +87,31 @@ func NewUnlockWindow(a fyne.App, v *vault.Vault, onUnlock UnlockDoneFunc) fyne.W
 		fyne.Do(func() {
 			isFirstRun = firstRun
 
+			submit := func(string) {
+				if !submitBtn.Disabled() {
+					submitBtn.OnTapped()
+				}
+			}
+
 			var heading string
 			var fields fyne.CanvasObject
 			if firstRun {
 				w.SetTitle("Set Unlock Password")
 				heading = "Choose an unlock password for your vault data.\nYou will need this password every time you open Cowbird."
 				submitBtn.SetText("Create")
-				fields = container.NewVBox(passwordEntry, confirmEntry)
+				passwordEntry.OnChanged = func(s string) {
+					var score float64
+					score, strengthLabel = passwordStrength(s)
+					strengthBar.SetValue(score)
+				}
+				passwordEntry.OnSubmitted = func(string) { w.Canvas().Focus(confirmEntry) }
+				confirmEntry.OnSubmitted = submit
+				fields = container.NewVBox(passwordEntry, strengthBar, confirmEntry)
 			} else {
 				w.SetTitle("Unlock Cowbird")
 				heading = "Enter your unlock password."
 				submitBtn.SetText("Unlock")
+				passwordEntry.OnSubmitted = submit
 				fields = container.NewVBox(passwordEntry)
 			}
 
@@ -107,6 +125,7 @@ func NewUnlockWindow(a fyne.App, v *vault.Vault, onUnlock UnlockDoneFunc) fyne.W
 			body.Objects = []fyne.CanvasObject{form}
 			body.Refresh()
 			submitBtn.Enable()
+			w.Canvas().Focus(passwordEntry)
 		})
 	}()
 

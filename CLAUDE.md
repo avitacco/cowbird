@@ -128,7 +128,7 @@ One `Content` interface with concrete typed structs: `Login`, `Card`, `Note`, `I
 
 ## Gotchas
 
-- Fyne widget values must be captured on the main thread before launching goroutines. All Fyne widget updates from goroutines must use `fyne.Do()`.
+- Fyne widget values must be captured on the main thread before launching goroutines. All Fyne widget updates from goroutines must use `fyne.Do()` — and that includes *window creation and `Show()`*, not just widget mutation. Watch completion callbacks: a callback invoked from a worker goroutine (e.g. setup's `onComplete`) silently carries the wrong thread into any UI work it does; Fyne logs "Error in Fyne call thread" warnings when this happens.
 - `widget.NewFormItem` is not a `fyne.CanvasObject`, so it cannot be added to `container.NewVBox`.
 - `viper.ConfigFileNotFoundError` is not triggered when using `SetConfigFile`; check with `os.IsNotExist` instead.
 - `time.Duration` serializes as raw nanoseconds through mapstructure/viper.

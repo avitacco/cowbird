@@ -35,6 +35,9 @@ func NewSetupWindow(a fyne.App, onComplete SetupDoneFunc) fyne.Window {
 		methodNames[i] = m.Name()
 	}
 
+	statusLabel := widget.NewLabel("")
+	connectBtn := widget.NewButton("Connect", nil)
+
 	var selectedMethod auth.Method
 	fieldEntries := map[string]*widget.Entry{}
 	credContainer := container.NewVBox()
@@ -48,6 +51,13 @@ func NewSetupWindow(a fyne.App, onComplete SetupDoneFunc) fyne.Window {
 			var entry *widget.Entry
 			if f.Secret {
 				entry = widget.NewPasswordEntry()
+				// Enter in the secret field (password/token/secret ID)
+				// submits the form.
+				entry.OnSubmitted = func(string) {
+					if !connectBtn.Disabled() {
+						connectBtn.OnTapped()
+					}
+				}
 			} else {
 				entry = widget.NewEntry()
 			}
@@ -73,9 +83,6 @@ func NewSetupWindow(a fyne.App, onComplete SetupDoneFunc) fyne.Window {
 	if len(methodNames) > 0 {
 		methodSelect.SetSelected(methodNames[0])
 	}
-
-	statusLabel := widget.NewLabel("")
-	connectBtn := widget.NewButton("Connect", nil)
 
 	setStatus := func(msg string) {
 		fyne.Do(func() {
@@ -185,6 +192,7 @@ func NewSetupWindow(a fyne.App, onComplete SetupDoneFunc) fyne.Window {
 	w.SetContent(container.NewPadded(content))
 	w.Resize(fyne.NewSize(440, 500))
 	w.CenterOnScreen()
+	w.Canvas().Focus(addressEntry)
 
 	return w
 }
