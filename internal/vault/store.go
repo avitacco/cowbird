@@ -246,3 +246,34 @@ func (v *Vault) ListSharedLinks(ctx context.Context) ([]sharing.SharedLink, erro
 func (v *Vault) linkPath(shareID string) string {
 	return "users/" + v.EntityID + "/links/" + shareID
 }
+
+// --- share records (users/<entityID>/shares/<shareID>) ------------------------
+
+func (v *Vault) PutShareRecord(ctx context.Context, rec sharing.ShareRecord) error {
+	_, err := v.kvWrite(ctx, v.shareRecordPath(rec.ShareID), rec)
+	return err
+}
+
+func (v *Vault) ListShareRecords(ctx context.Context) ([]sharing.ShareRecord, error) {
+	keys, err := v.kvList(ctx, "users/"+v.EntityID+"/shares")
+	if err != nil {
+		return nil, err
+	}
+	recs := make([]sharing.ShareRecord, 0, len(keys))
+	for _, key := range keys {
+		var rec sharing.ShareRecord
+		if _, err := v.kvRead(ctx, v.shareRecordPath(key), &rec); err != nil {
+			return nil, fmt.Errorf("reading share record %s: %w", key, err)
+		}
+		recs = append(recs, rec)
+	}
+	return recs, nil
+}
+
+func (v *Vault) DeleteShareRecord(ctx context.Context, shareID string) error {
+	return v.kvDelete(ctx, v.shareRecordPath(shareID))
+}
+
+func (v *Vault) shareRecordPath(shareID string) string {
+	return "users/" + v.EntityID + "/shares/" + shareID
+}

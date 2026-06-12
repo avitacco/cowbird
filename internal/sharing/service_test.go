@@ -37,6 +37,7 @@ type memStore struct {
 	mu       sync.Mutex
 	ownItems map[string]Envelope
 	links    map[string]SharedLink
+	records  map[string]ShareRecord
 }
 
 func newMemStore(entityID string, state *sharedState) *memStore {
@@ -45,6 +46,7 @@ func newMemStore(entityID string, state *sharedState) *memStore {
 		state:    state,
 		ownItems: make(map[string]Envelope),
 		links:    make(map[string]SharedLink),
+		records:  make(map[string]ShareRecord),
 	}
 }
 
@@ -198,6 +200,33 @@ func (m *memStore) ListSharedLinks(_ context.Context) ([]SharedLink, error) {
 		out = append(out, link)
 	}
 	return out, nil
+}
+
+func (m *memStore) PutShareRecord(_ context.Context, rec ShareRecord) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.records[rec.ShareID] = rec
+	return nil
+}
+
+func (m *memStore) ListShareRecords(_ context.Context) ([]ShareRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]ShareRecord, 0, len(m.records))
+	for _, rec := range m.records {
+		out = append(out, rec)
+	}
+	return out, nil
+}
+
+func (m *memStore) DeleteShareRecord(_ context.Context, shareID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.records[shareID]; !ok {
+		return ErrNotFound
+	}
+	delete(m.records, shareID)
+	return nil
 }
 
 // --- helpers -----------------------------------------------------------------
@@ -406,6 +435,171 @@ func TestProcessInboxIdempotent(t *testing.T) {
 	links, _ = te.bobStr.ListSharedLinks(te.ctx)
 	if len(links) != 1 {
 		t.Fatalf("expected 1 link after replay, got %d", len(links))
+	}
+}
+
+func TestShareWritesRecordRevokeRemovesIt(t *testing.T) {
+	te := newTestEnv(t)
+	env, err := te.aliceSvc.CreateItem(te.ctx, items.Note{Title: "Tracked", Body: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := te.aliceSvc.Share(te.ctx, env.ID, te.bobID); err != nil {
+		t.Fatal(err)
+	}
+
+	recs, err := te.aliceSvc.ListShareRecords(te.ctx, env.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 share record, got %d", len(recs))
+	}
+	if recs[0].ItemID != env.ID || recs[0].RecipientID != te.bobID {
+		t.Fatalf("record mismatch: %+v", recs[0])
+	}
+
+	if err := te.aliceSvc.Revoke(te.ctx, recs[0].ShareID, te.bobID); err != nil {
+		t.Fatal(err)
+	}
+	recs, err = te.aliceSvc.ListShareRecords(te.ctx, env.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 0 {
+		t.Fatalf("expected 0 share records after revoke, got %d", len(recs))
+	}
+
+	// Retrying the revoke after everything is gone must not error.
+	if err := te.aliceSvc.Revoke(te.ctx, "no-such-share", te.bobID); err != nil {
+		t.Fatalf("re-revoke should be idempotent: %v", err)
+	}
+}
+
+func TestUpdateItemPropagatesToShares(t *testing.T) {
+	te := newTestEnv(t)
+	env, err := te.aliceSvc.CreateItem(te.ctx, items.Login{Title: "Site", Username: "alice", Password: "old"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldNonce := append([]byte(nil), env.Nonce...)
+
+	if err := te.aliceSvc.Share(te.ctx, env.ID, te.bobID); err != nil {
+		t.Fatal(err)
+	}
+	if err := te.bobSvc.ProcessInbox(te.ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := te.aliceSvc.UpdateItem(te.ctx, env.ID, items.Login{Title: "Site", Username: "alice", Password: "new"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(updated.Nonce) == string(oldNonce) {
+		t.Fatal("update must use a fresh nonce")
+	}
+
+	// Alice reads her own copy back.
+	got, err := te.aliceSvc.OpenOwnItem(te.ctx, updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.(items.Login).Password != "new" {
+		t.Fatalf("owner copy not updated: %+v", got)
+	}
+
+	// Bob sees the edit through his existing link, without re-sharing.
+	links, _ := te.bobStr.ListSharedLinks(te.ctx)
+	if len(links) != 1 {
+		t.Fatalf("expected 1 link, got %d", len(links))
+	}
+	shared, err := te.bobSvc.OpenSharedItem(te.ctx, links[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shared.(items.Login).Password != "new" {
+		t.Fatalf("recipient did not see the edit: %+v", shared)
+	}
+}
+
+func TestDeleteItemRevokesShares(t *testing.T) {
+	te := newTestEnv(t)
+	env, err := te.aliceSvc.CreateItem(te.ctx, items.Note{Title: "Doomed", Body: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := te.aliceSvc.Share(te.ctx, env.ID, te.bobID); err != nil {
+		t.Fatal(err)
+	}
+	if err := te.bobSvc.ProcessInbox(te.ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := te.aliceSvc.DeleteItem(te.ctx, env.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Owner's item, share record, and the shared envelope are all gone.
+	if _, err := te.aliceStr.GetItem(te.ctx, env.ID); err != ErrNotFound {
+		t.Fatalf("expected item gone, got %v", err)
+	}
+	recs, _ := te.aliceSvc.ListShareRecords(te.ctx, env.ID)
+	if len(recs) != 0 {
+		t.Fatalf("expected 0 share records, got %d", len(recs))
+	}
+	te.state.mu.Lock()
+	nShared := len(te.state.shared)
+	te.state.mu.Unlock()
+	if nShared != 0 {
+		t.Fatalf("expected 0 shared envelopes, got %d", nShared)
+	}
+
+	// Bob's inbox has a revoke message; processing it removes his link.
+	if err := te.bobSvc.ProcessInbox(te.ctx); err != nil {
+		t.Fatal(err)
+	}
+	links, _ := te.bobStr.ListSharedLinks(te.ctx)
+	if len(links) != 0 {
+		t.Fatalf("expected 0 links after delete, got %d", len(links))
+	}
+}
+
+func TestDeleteSharedLinkCleansDeadLink(t *testing.T) {
+	te := newTestEnv(t)
+	env, err := te.aliceSvc.CreateItem(te.ctx, items.Note{Title: "Dead", Body: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := te.aliceSvc.Share(te.ctx, env.ID, te.bobID); err != nil {
+		t.Fatal(err)
+	}
+	if err := te.bobSvc.ProcessInbox(te.ctx); err != nil {
+		t.Fatal(err)
+	}
+	links, _ := te.bobStr.ListSharedLinks(te.ctx)
+	if len(links) != 1 {
+		t.Fatalf("expected 1 link, got %d", len(links))
+	}
+
+	// Simulate a missed revoke: the envelope vanishes but Bob's link remains.
+	te.state.mu.Lock()
+	delete(te.state.shared, links[0].ShareID)
+	te.state.mu.Unlock()
+
+	if _, err := te.bobSvc.OpenSharedItem(te.ctx, links[0]); err == nil {
+		t.Fatal("expected error opening dead link")
+	}
+
+	if err := te.bobSvc.DeleteSharedLink(te.ctx, links[0].ShareID); err != nil {
+		t.Fatal(err)
+	}
+	links, _ = te.bobStr.ListSharedLinks(te.ctx)
+	if len(links) != 0 {
+		t.Fatalf("expected 0 links after cleanup, got %d", len(links))
+	}
+	// Cleaning an already-clean link is fine.
+	if err := te.bobSvc.DeleteSharedLink(te.ctx, "already-gone"); err != nil {
+		t.Fatalf("second delete should be a no-op: %v", err)
 	}
 }
 
